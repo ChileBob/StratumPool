@@ -2,6 +2,13 @@
 
 This is a very simple stratum server for connecting GPU miners to a Ycash full node.
 
+There's no dev fee, this code is MIT Licence so feel free to use it however you like - just dont expect any support ;-)
+
+If you'd like to buy me a beer :-
+
+ys1c8cvazsz5gfp2zhdmzxcarfh4gp6jezdcxnywfcpyuau0l0f9uj99tzvrr6sjw5rfhpsw06lc6n
+
+
 ## Requirements :-
 
 - Ubuntu/Debian Linux

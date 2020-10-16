@@ -6,7 +6,7 @@ This is a very simple stratum server for connecting GPU miners to a Ycash full n
 
 - Ubuntu/Debian Linux
 
-## Things it DOES do :-
+## Features :-
 
 - allows *many* miners to connect
 - pays rewards in the coinbase transaction

@@ -39,7 +39,6 @@ my $config;							# These configs can be changed from the command line
 $config->{'debug'}    = 0;					# debugging, turned off by default
 $config->{'port'}     = 3333;					# default listening port number
 $config->{'password'} = '';					# default miner password
-$config->{'coin'}     = 'ycash';				# coin that we're mining, default is ycash
 $config->{'stats_refresh'} = 1;					# interval (seconds) to update stats display
 
 my $conf;							# Config settings that cant be changed via command line
@@ -56,7 +55,7 @@ $conf->{'stats_refresh'} = 0;					# epoch of last stats display update
 
 my $block;							# hash for storing templates
 
-&config_load("$ENV{'HOME'}/.$config->{'coin'}/$config->{'coin'}.conf");		# load node config file so we can connect to the RPC server
+&config_load("$ENV{'HOME'}/.ycash/ycash.conf");			# load node config file so we can connect to the RPC server
 
 if (@ARGV) {							# parse command line
 	while (@ARGV) {

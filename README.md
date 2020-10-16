@@ -1,4 +1,4 @@
-# Ystratum : Solo-mining stratum server for GPU-mining
+# StratumPool : Solo-mining stratum server for GPU-mining Ycash
 
 This is a very simple stratum server for connecting GPU miners to a Ycash full node.
 
@@ -8,18 +8,13 @@ This is a very simple stratum server for connecting GPU miners to a Ycash full n
 
 ## Things it DOES do :-
 
-- allows *many* miners to connect and mine to their own payment address
-- pays all rewards within the coinbase transaction
-- this is strictly for SOLO-MINING, or 'POOLED-SOLO-MINING'
-
-## Things it DOESNT do :-
-
-- does not hold miners rewards, payouts occur immediatly a block is mined.
-- no ongoing support
+- allows *many* miners to connect
+- pays rewards in the coinbase transaction
+- this is strictly for SOLO-MINING
 
 # Usage :-
 
-ystratum --port 3333 --password notsecret
+stratumpool --port 3333 --password notsecret
 
 * `--port (port number for miner connections)`
 * `--password (optional password miners need to connect)`

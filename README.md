@@ -24,7 +24,7 @@ If you'd like to buy beers :-
 
 ## Usage :-
 
-stratumpool --port 3333 --password notsecret
+stratumpool --port=3333 --password=notsecret
 
 * `--port (port number for miner connections)`
 * `--password (optional password miners need to connect)`

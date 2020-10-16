@@ -1,4 +1,4 @@
-# StratumPool : Solo-mining stratum server for GPU-mining Ycash
+# StratumPool : Solo-mining stratum server
 
 This is a very simple stratum server for connecting GPU miners to a Ycash full node.
 

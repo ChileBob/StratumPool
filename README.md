@@ -23,15 +23,7 @@ SOFTWARE.
 
 # Ystratum : Solo-mining stratum server for GPU-mining
 
-This is a very simple stratum server for connecting GPU miners to Zcash/Ycash full node.
-
-Its been used for Ycash test-forks prior their mainnet and supported their testnet for a month.
-
-Solo-mining *might* be profitable for a while after the mainnet fork, although this depends on
-how much hashing power you have, the total network hashpower and your electricity cost.
-
-There's all sorts of 'political tribalism' going on regarding Ycash & Zcash that I really dont
-care about, both projects are about financial privacy and thats good enough for me.
+This is a very simple stratum server for connecting GPU miners to a Ycash full node.
 
 ## Requirements :-
 

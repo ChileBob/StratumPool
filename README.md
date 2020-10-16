@@ -39,33 +39,21 @@ care about, both projects are about financial privacy and thats good enough for 
 
 ## Things it DOES do :-
 
-- works with EWBF v0.5 (not tested with other miners)
-- pays a 'dev fee' to the node local wallet
 - allows *many* miners to connect and mine to their own payment address
 - pays all rewards within the coinbase transaction
-- the full block reward is sent to the miner that mined it, or the local wallet if its a 'devfee' block
 - this is strictly for SOLO-MINING, or 'POOLED-SOLO-MINING'
 
 ## Things it DOESNT do :-
 
-- does not pay a proportion of block reward based on work sent, its all or nothing
 - does not hold miners rewards, payouts occur immediatly a block is mined.
 - no ongoing support
 
-## Things it MIGHT do :-
-
-- probably works with Zcash (not tested)
-- probably works with other miners (not tested)
-
 # Usage :-
 
-ystratum --port 3100 --devfee 1 --password notsecret --alert 570000
+ystratum --port 3333 --password notsecret
 
 * `--port (port number for miner connections)`
-* `--devfee (optional devfee paid to local wallet, ie: 1%)`
 * `--password (optional password miners need to connect)`
-* `--alert (block number countdown alert)`
-* `--coin (ycash or zcash)`
 
 # Installation  :-
 

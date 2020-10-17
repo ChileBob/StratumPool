@@ -122,15 +122,12 @@ while($running) {											# main loop
 							$client_info->{$id}->{'id'}  	  = $req->{'id'};
 							$client_info->{$id}->{'software'} = $req->{'params'}[0];		# clients mining software
 							$client_info->{$id}->{'port'}     = $req->{'params'}[3];		# connecting port number
-
 																# generate nonce for this client	
-							$client_info->{$id}->{'work'}->{'nonce1'}   = sprintf("%04x", $id) . &newkey($client_info->{$id}->{'nonce1_size'} - 4);	
+							$client_info->{$id}->{'work'}->{'nonce1'}   = sprintf("%04x", $id) . newkey($client_info->{$id}->{'nonce1_size'} - 4);	
 
 																# send response
-							debug("sending: \{\"id\":$req->{'id'},\"result\":\[null,\"$client_info->{$id}->{'nonce1'}\"\],\"error\":null\}\n");
-							$fh->write("\{\"id\":$req->{'id'},\"result\":\[null,\"$client_info->{$id}->{'work'}->{'nonce1'}\"\],\"error\":null\}\n");
+							write_client($fh, "\{\"id\":$req->{'id'},\"result\":\[null,\"$client_info->{$id}->{'work'}->{'nonce1'}\"\],\"error\":null\}\n");
 
-							$client_info->{$id}->{'updated'} = time;				# time of last update
 						}
 
 						elsif ($req->{'method'} eq 'mining.authorize') {				# authorize client
@@ -141,7 +138,8 @@ while($running) {											# main loop
 
 							if ($config->{'password'}) {						# check password (if required)
 								if ($client_info->{$id}->{'password'} ne $config->{'password'}) {
-									$fh->write("\{\"id\":$req->{'id'},\"result\": false,\"error\": \"Auth Failed\"}\n");
+
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false,\"error\": \"Auth Failed\"}\n");
 									disconnect_client($fh);
 								}
 							}
@@ -151,19 +149,19 @@ while($running) {											# main loop
 								$client_info->{$id}->{'auth'}    = 1;						# authenticated
 								$client_info->{$id}->{'address'} = $req->{'params'}[0];				# store payment address
 								$client_info->{$id}->{'scriptPubKey'} = $resp->{'scriptPubKey'};		# store scriptPubKey
-								$fh->write("\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# tell client they're authorized
+
+								write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# tell client they're authorized
 							}
 							else {
-								$fh->write("\{\"id\":$req->{'id'},\"result\": false,\"error\": \"Invalid address\"}\n");	# auth failed
+								write_client($fh, "\{\"id\":$req->{'id'},\"result\": false,\"error\": \"Invalid address\"}\n");	# auth failed
 								disconnect_client($fh);
 							}
-							$client_info->{$id}->{'updated'} = time;					# time of last update
 						}
 
 						elsif ($req->{'method'} eq 'mining.extranonce.subscribe') {				# request a nonce? or just let us know that it can do that?
 							debug("$id : mining.extranonce.subscribe");
-							$fh->write("\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# success
-							$client_info->{$id}->{'updated'} = time;					# time of last update
+
+							write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# success
 						}
 	
 						elsif ($req->{'method'} eq 'mining.submit') {						# submitting work
@@ -189,28 +187,28 @@ while($running) {											# main loop
 								if ($resp eq 'inconclusive') {
 									debug("$id : inconclusive");
 									$client_info->{$id}->{'work_rejected'}++;
-									$fh->write("\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
 								}
 								elsif ($resp eq 'invalid-solution') {
 									debug("$id : invalid_solution");
 									$client_info->{$id}->{'work_rejected'}++;
-									$fh->write("\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
 								}
 								elsif ($resp eq 'high-hash') {
 									debug("$id : high-hash");
 									$client_info->{$id}->{'work_rejected'}++;
-									$fh->write("\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
 								}
 								elsif ($resp eq '') {							# node accepts work quietly, it doesnt return a status
 									debug("$id : BLOCK FOUND ");
 									$client_info->{$id}->{'work_accepted'}++;
-									$fh->write("\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
 									$conf->{'block_found'}++;
 								}
 
 								else {
 									debug("$id : ERROR: node_rpc said : $resp");
-									$fh->write("\{\"id\":$req->{'id'},\"result\": false\}\n");	# failure??? node complained but we didnt understand
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# failure??? node complained but we didnt understand
 									$client_info->{$id}->{'work_rejected'}++;
 								}
 							}
@@ -220,11 +218,11 @@ while($running) {											# main loop
 
 								if ($response->{'content'}->{'result'}->{'height'} == ($block->{'current'} + 1) ) {	# WE MINED A BLOCK & have the template for the next one !
 									$block->{'current'} = $response->{'content'}->{'result'};
-									$fh->write("\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK
 									debug("$id : BLOCK ACCEPTED!!");
 								}
 								else {
-									$fh->write("\{\"id\":$req->{'id'},\"result\": false\}\n");
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");
 									debug("$id : BLOCK REJECTED!!");
 								}
 							}
@@ -320,10 +318,9 @@ while($running) {											# main loop
 					debug("$id : sending work");
 					new_work($id);			
 
-					$fh->write("\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$client_info->{$id}->{'work'}->{'worknumber'}\",\"$client_info->{$id}->{'work'}->{'version'}\",\"$client_info->{$id}->{'work'}->{'previousblockhash'}\",\"$client_info->{$id}->{'work'}->{'merkleroot'}\",\"$client_info->{$id}->{'work'}->{'finalsaplingroothash'}\",\"$client_info->{$id}->{'work'}->{'time'}\",\"$client_info->{$id}->{'work'}->{'bits'}\",true,\"ZcashPoW\"\]\}\n");	
+					write_client($fh, "\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$client_info->{$id}->{'work'}->{'worknumber'}\",\"$client_info->{$id}->{'work'}->{'version'}\",\"$client_info->{$id}->{'work'}->{'previousblockhash'}\",\"$client_info->{$id}->{'work'}->{'merkleroot'}\",\"$client_info->{$id}->{'work'}->{'finalsaplingroothash'}\",\"$client_info->{$id}->{'work'}->{'time'}\",\"$client_info->{$id}->{'work'}->{'bits'}\",true,\"ZcashPoW\"\]\}\n");	
 
 					$client_info->{$id}->{'mining'} = 1;					# tag miner as mining
-					$client_info->{$id}->{'updated'} = time;
 				}
 
 				# miner is working on an old block, set the current target & tag as idle so it gets the next update
@@ -332,31 +329,28 @@ while($running) {											# main loop
 
 					debug("$id : working on stale block");
 					if ($client_info->{$id}->{'target'} ne $block->{'current'}->{'target'}) {	# check to see if target needs updating
-						$fh->write("\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
+						write_client($fh, "\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
 						$client_info->{$id}->{'target'} = $block->{'current'}->{'target'};	# cache target
 
 					}
 					$client_info->{$id}->{'mining'} = 0;						# tag as idle
 					$client_info->{$id}->{'ready'}  = 0;						# tag as needing fresh target
-					$client_info->{$id}->{'updated'} = time;
 				}
 
 				# miner is authenticated & not ready, set the work target
 				#
 				elsif ( ($client_info->{$id}->{'mining'} == 0) && ($client_info->{$id}->{'ready'} == 0) && ($client_info->{$id}->{'auth'} == 1 ) ) {
 					debug("$id : sending target");
-					$fh->write("\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
+					write_client($fh, "\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
 					$client_info->{$id}->{'target'} = $block->{'current'}->{'target'};		# cache target
 					$client_info->{$id}->{'ready'} = 1;						# tag miner as ready
-					$client_info->{$id}->{'updated'} = time;
 				}
 
 
 				elsif ( ($client_info->{$id}->{'mining'} == 1) && ((time - $client_info->{$id}->{'updated'}) > $conf->{'miner_timeout'}) ) {	# refresh current job to prevent timeout
 					debug("$id : refreshing work");
 
-					$fh->write("\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$client_info->{$id}->{'work'}->{'worknumber'}\",\"$client_info->{$id}->{'work'}->{'version'}\",\"$client_info->{$id}->{'work'}->{'previousblockhash'}\",\"$client_info->{$id}->{'work'}->{'merkleroot'}\",\"$client_info->{$id}->{'work'}->{'finalsaplingroothash'}\",\"$client_info->{$id}->{'work'}->{'time'}\",\"$client_info->{$id}->{'work'}->{'bits'}\",false,\"ZcashPoW\"\]\}\n");	
-					$client_info->{$id}->{'updated'} = time;
+					write_client($fh, "\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$client_info->{$id}->{'work'}->{'worknumber'}\",\"$client_info->{$id}->{'work'}->{'version'}\",\"$client_info->{$id}->{'work'}->{'previousblockhash'}\",\"$client_info->{$id}->{'work'}->{'merkleroot'}\",\"$client_info->{$id}->{'work'}->{'finalsaplingroothash'}\",\"$client_info->{$id}->{'work'}->{'time'}\",\"$client_info->{$id}->{'work'}->{'bits'}\",false,\"ZcashPoW\"\]\}\n");	
 				}
 			}
 		}
@@ -660,6 +654,17 @@ sub disconnect_client {
 	$sel->remove($_[0]);								# remove from active connections
 
 	$_[0]->shutdown(2);								# close socket
+}
+
+sub write_client {
+
+	my ($fh, $json) = @_;
+
+	$fh->write($json);
+
+	$client_info->{ $client->{$fh->fileno} }->{'updated'} = time;			# reset updated timestamp
+
+	debug("SEND: $json");
 }
 
 

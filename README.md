@@ -11,8 +11,7 @@ If you'd like to buy beers :-
 
 ## Requirements :-
 
-- Ubuntu/Debian Linux
-- Ycash Full Node
+- Ycash Full Node (Ubuntu/Debian Linux)
 - GPU Hardware (ie: Nvidia)
 - GPU Mining Software for Equihash 192,7 (ie: miniZ v1.6w)
 

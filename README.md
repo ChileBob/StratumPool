@@ -16,6 +16,12 @@ If you'd like to buy beers :-
 - GPU Hardware (ie: Nvidia)
 - GPU Mining Software for Equihash 192,7 (ie: miniZ v1.6w)
 
+## Tested Miners :-
+
+- GMiner (v2.28)
+- lolMiner (v0.8.4)
+- miniZ (v1.6w)
+
 ## Features :-
 
 - allows *many* miners to connect

@@ -113,6 +113,8 @@ while($running) {											# main loop
 				my $id = $client->{$fh->fileno};					# get client index id
 				my $buf = <$fh>;
 
+				debug("$id : RECV $buf");						# log what the miner sent to us
+
 				if($buf) {							
 					my $req = &decode_request($buf);				# decode the client input & screen for garbage
 					if ($req) {
@@ -664,7 +666,7 @@ sub write_client {
 
 	$client_info->{ $client->{$fh->fileno} }->{'updated'} = time;			# reset updated timestamp
 
-	debug("SEND: $json");
+	debug("$client->{$fh->fileno} : SEND: $json");
 }
 
 

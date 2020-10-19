@@ -3,13 +3,13 @@
 These are a very simple stratum servers for connecting GPU miners to a Ycash full node.
 
 - StratumPool : Allows miners to specify their own transparent ycash address.
-- StratumSolo : Connecting clients mine to the local node wallet ONLY
+- StratumSolo : Connecting clients mine to the local node wallet ONLY.
 
 Both operate as solo-pools', so a miner gets paid ONLY IF they find the solution to a block.
 
 Payments are made within the coinbase transaction, which means :-
-- Rewards must mature before they can be spend (100 blocks)
-- The first transaction MUST be to a shielded address (s2y)
+- Rewards must mature for 100 blocks before they can be spent.
+- The first transaction MUST be to a shielded address (s2y).
 
 There's no dev fee, just dont expect any support !! If you'd like to buy beers :-
 
@@ -31,9 +31,9 @@ There's no dev fee, just dont expect any support !! If you'd like to buy beers :
 
 ## Features :-
 
-- allows *many* miners to connect
-- pays rewards in the coinbase transaction
-- this is strictly for SOLO-MINING
+- Allows *many* miners to connect
+- Pays rewards in the coinbase transaction
+- This is strictly for SOLO-MINING
 
 ## Usage :-
 

@@ -10,7 +10,6 @@ use IO::Socket;
 use IO::Select;
 use JSON;					
 use HTTP::Request;					
-#use JSON::Create 'create_json';
 use Digest::SHA qw(sha256);
 use Data::Dumper;
 
@@ -24,13 +23,9 @@ $config->{'port'}     = 3334;					# default listening port number
 $config->{'password'} = '';					# default miner password
 
 my $conf;							# Config settings that cant be changed via command line
-$conf->{'block_found'} = 0;					# blocks found so far this session
-$conf->{'miner_count'} = 0;					# number of connected miners
-$conf->{'miner_count_last'} = 0;				# previous count of connected miners
 $conf->{'nonce1_size'} = 16;					# this leaves 8 bytes of nonce for the miner to work through, its a lot!
 $conf->{'miner_timeout'} = 60;					# block timeout, work is resent to miners after this many seconds so they dont timeout
 $conf->{'block_start'} = 0;					# starting block for this session
-$conf->{'block_count'} = 0;					# count of blocks this session
 $conf->{'node_state'} = 1;					# node status, 1 = up, 0 = down
 $conf->{'node_check'} = 0;					# epoch of last time node was checked for new blocks
 $conf->{'blocksize'} = 2 * 1024 * 1024;				# maximum block size (2Mb)
@@ -101,8 +96,9 @@ while($running) {											# main loop
 					my $req = decode_request($buf);					# decode the client input & screen for garbage
 					if ($req) {
 
+						debug("$id : $req->{'method'}");
+
 						if ($req->{'method'} eq 'mining.subscribe') {		# connect to server
-							debug("$id : mining.subscribe");
 							$client_info->{$id}->{'id'}  	  = $req->{'id'};
 							$client_info->{$id}->{'software'} = $req->{'params'}[0];		# clients mining software
 							$client_info->{$id}->{'port'}     = $req->{'params'}[3];		# connecting port number
@@ -110,23 +106,17 @@ while($running) {											# main loop
 						}
 
 						elsif ($req->{'method'} eq 'mining.authorize') {				# authorize client (we say yes to everyone!)
-							debug("$id : mining.authorize");
 							$client_info->{$id}->{'auth'} = 1;				# 1 = authorized, 0 = idle
 							write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# success
 						}
 
 						elsif ($req->{'method'} eq 'mining.extranonce.subscribe') {				# request a nonce? or just let us know that it can do that?
-							debug("$id : mining.extranonce.subscribe");
-
-							write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# success
-
 							$client_info->{$id}->{'mining'} = 0;						# tag miner as done so it gets a new job
 							$client_info->{$id}->{'ready'}  = 0;						# tag miner as not ready so it gets a new target
+							write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# success
 						}
 	
 						elsif ($req->{'method'} eq 'mining.submit') {						# submitting work
-							debug("$id : mining.submit");
-
 							$client_info->{$id}->{'mining'} = 0;						# tag miner as done so it gets a new job
 							$client_info->{$id}->{'ready'}  = 0;						# tag miner as not ready so it gets a new target
 
@@ -159,7 +149,6 @@ while($running) {											# main loop
 								elsif ($resp eq '') {								# node accepts work quietly, it doesnt return a status
 									debug("$id : BLOCK FOUND ");
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
-									$conf->{'block_found'}++;
 								}
 
 								else {
@@ -192,8 +181,6 @@ while($running) {											# main loop
 						debug("$id : WARNING: GARBAGE JSON REQUEST : $buf");
 						disconnect_client($fh);
 					}
-
-
 				}
 				else {												# disconnect client
 					disconnect_client($fh);
@@ -249,8 +236,7 @@ while($running) {											# main loop
 
 	if ($flag_newblock == 1) {											# force all miners to start a new job
 		$block->{'current'} = $block->{'template'};								# use the fresh block template
-		$conf->{'block_count'}++;
-		new_work();
+		new_work();												# generate new work
 
 		@ready = $sel->can_write(0);										# get all connected miners
 		foreach my $fh (@ready) {						
@@ -266,11 +252,6 @@ while($running) {											# main loop
 
 	my @active = $sel->can_write(0);										# get all active sockets 
 	if (@active) {													# send work/updates to all miners
-
-		$conf->{'miner_count'} = (scalar @active);								# update the miner count
-		if ($conf->{'miner_count'} != $conf->{'miner_count_last'}) {
-			$conf->{'miner_count_last'} = $conf->{'miner_count'};
-		}
 
 		foreach my $fh (@active) {						
 			if ($fh != $lsn) {										# ensure we're only talking to clients
@@ -331,7 +312,6 @@ sub decode_request {
 	}
 }
 
-
 sub node_rpc {
 	
 	my $resp = `ycash-cli $_[0] 2>&1`;						# call rpc client, which MUST be in the path
@@ -377,7 +357,6 @@ sub reverse_bytes {									# reverse byte order of hex-encoded string
 	return($hex);
 }
 
-
 sub compact_size {									# generate compactSize string from integer (or hex-encoded data if $_[2] = 's'
 
 	my $length;
@@ -411,7 +390,6 @@ sub compact_size {									# generate compactSize string from integer (or hex-en
 	}
 }
 
-
 sub merkleroot {									# generate merkleroot from array-ref of transaction ids
 
 	my @hashes = ();
@@ -441,12 +419,10 @@ sub merkleroot {									# generate merkleroot from array-ref of transaction ids
 	return($hashes[0]);								# return hex-encoded big-endian
 }
 
-
 sub new_work() {								# generate new mining task, all miners get the same task 
 
-	my @txid = ();
+	my @txid  = ();
 	my @txraw = ();
-
 	my $blocksize = $conf->{'headersize'};				
 
 	$work->{'blocknumber'} = $block->{'current'}->{'height'};						# cache block number
@@ -532,9 +508,6 @@ sub disconnect_all {
 	}
 }
 
-
-
-
 sub restart_all {									# reset all connected miners
 
 	debug("restarting all miners");
@@ -570,16 +543,13 @@ sub disconnect_client {
 sub write_client {
 
 	my ($fh, $json) = @_;
-
-	debug("$client->{$fh->fileno} : SEND: $json");
+#	debug("$client->{$fh->fileno} : SEND: $json");
 
 	$fh->write($json);
 	$client_info->{ $client->{$fh->fileno} }->{'updated'} = time;			# reset updated timestamp
 }
 
-
 sub shutdown {
-
 	$running = 0;
 }
 

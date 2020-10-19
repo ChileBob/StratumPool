@@ -11,8 +11,7 @@ Payments are made within the coinbase transaction, which means :-
 - Rewards must mature before they can be spend (100 blocks)
 - The first transaction MUST be to a shielded address (s2y)
 
-There's no dev fee, just dont expect any support ;-)
-If you'd like to buy beers :-
+There's no dev fee, just dont expect any support !! If you'd like to buy beers :-
 
 - YCASH : ys1c8cvazsz5gfp2zhdmzxcarfh4gp6jezdcxnywfcpyuau0l0f9uj99tzvrr6sjw5rfhpsw06lc6n
 - ZCASH : https://www.z2z.to/ChileBob

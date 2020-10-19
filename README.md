@@ -2,8 +2,8 @@
 
 These are a very simple stratum servers for connecting GPU miners to a Ycash full node.
 
-StratumPool : Allows miners to specify their own transparent ycash address.
-StratumSolo : Connecting clients mine to the local node wallet ONLY
+- StratumPool : Allows miners to specify their own transparent ycash address.
+- StratumSolo : Connecting clients mine to the local node wallet ONLY
 
 Both operate as solo-pools', so a miner gets paid ONLY IF they find the solution to a block.
 

@@ -181,8 +181,6 @@ while($running) {											# main loop
 									debug("$id : BLOCK REJECTED!!");
 								}
 							}
-							new_work();										# generate new work 	
-							restart_all();										# restart all miners
 						}
 	
 						else {

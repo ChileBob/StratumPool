@@ -1,10 +1,17 @@
-# StratumPool : Ycash Solo-Mining Stratum Server
+# StratumPool & StratumSolo : Ycash Solo-Mining Stratum Servers
 
-This is a very simple stratum server for connecting GPU miners to a Ycash full node.
+These are a very simple stratum servers for connecting GPU miners to a Ycash full node.
 
-There's no dev fee, this code is MIT Licence so use it however you like - just dont expect any support ;-)
+- StratumPool : Allows miners to specify their own transparent ycash address.
+- StratumSolo : Connecting clients mine to the local node wallet ONLY.
 
-If you'd like to buy beers :-
+Both operate as solo-pools', so a miner gets paid ONLY IF they find the solution to a block.
+
+Payments are made within the coinbase transaction, which means :-
+- Rewards must mature for 100 blocks before they can be spent.
+- The first transaction MUST be to a shielded address (s2y).
+
+There's no dev fee, just dont expect any support !! If you'd like to buy beers :-
 
 - YCASH : ys1c8cvazsz5gfp2zhdmzxcarfh4gp6jezdcxnywfcpyuau0l0f9uj99tzvrr6sjw5rfhpsw06lc6n
 - ZCASH : https://www.z2z.to/ChileBob
@@ -12,7 +19,8 @@ If you'd like to buy beers :-
 ## Requirements :-
 
 - Ycash Full Node (Ubuntu/Debian Linux)
-- GPU Hardware (ie: Nvidia)
+- YECwallet Full Node
+- GPU Hardware (ie: Nvidia, AMD)
 - GPU Mining Software for Equihash 192,7 (ie: miniZ v1.6w)
 
 ## Tested Miners :-
@@ -23,16 +31,20 @@ If you'd like to buy beers :-
 
 ## Features :-
 
-- allows *many* miners to connect
-- pays rewards in the coinbase transaction
-- this is strictly for SOLO-MINING
+- Allows *many* miners to connect
+- Pays rewards in the coinbase transaction
+- This is strictly for SOLO-MINING
 
 ## Usage :-
 
 stratumpool --port=3333 --password=notsecret
 
-* `--port (port number for miner connections)`
+* `--port (port number for miner connections, default 3333)`
 * `--password (optional password miners need to connect)`
+
+stratumsolo (no config needed)
+
+* default port 3334
 
 ## Installation  :-
 

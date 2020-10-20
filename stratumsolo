@@ -15,25 +15,21 @@ use Data::Dumper;
 
 $SIG{INT} = \&shutdown;						# graceful shutdown, sends disconnect to all miners
 
-my $version = "v0.1";						# Current version, because everything should have one of those
+my $version = "v0.11";						# current version, because everything should have one of those
 
-my $config;							# These configs can be changed from the command line
-$config->{'debug'}    = 1;					# debugging, turned on by default
+my $config;							# port number can be changed from the command line
 $config->{'port'}     = 3334;					# default listening port number
-$config->{'password'} = '';					# default miner password
 
 my $conf;							# Config settings that cant be changed via command line
-$conf->{'nonce1_size'} = 16;					# this leaves 8 bytes of nonce for the miner to work through, its a lot!
+$conf->{'nonce1_size'}   = 16;					# leaves 8 bytes of nonce for the miner to work through, its a lot!
 $conf->{'miner_timeout'} = 60;					# block timeout, work is resent to miners after this many seconds so they dont timeout
-$conf->{'block_start'} = 0;					# starting block for this session
-$conf->{'node_state'} = 1;					# node status, 1 = up, 0 = down
-$conf->{'node_check'} = 0;					# epoch of last time node was checked for new blocks
-$conf->{'blocksize'} = 2 * 1024 * 1024;				# maximum block size (2Mb)
+$conf->{'block_start'}   = 0;					# starting block for this session
+$conf->{'node_state'}    = 1;					# node status, 1 = up, 0 = down
+$conf->{'node_check'}    = 0;					# epoch of last time node was checked for new blocks
+$conf->{'blocksize'}     = 2 * 1024 * 1024;			# maximum block size (2Mb)
 
 my $block;							# hash for storing templates
 my $work;							# mining work
-
-debug ("starting....");
 
 #####################################################################################################################################################################################################
 # START THE DAEMON
@@ -69,7 +65,6 @@ while($running) {											# main loop
 
 		foreach my $fh (@ready) {
 			if ($fh == $lsn) {								# master socket, accepts new connections
-				debug("client connecting");
 				my $new = $lsn->accept;							# accept the connection
 				$sel->add($new);							# add connection to active list
 				$client->{$new->fileno} = $client_number;				# track the client by connecting socket
@@ -90,13 +85,9 @@ while($running) {											# main loop
 				my $id = $client->{$fh->fileno};					# get client index id
 				my $buf = <$fh>;
 
-				debug("$id : RECV $buf");						# log what the miner sent to us
-
 				if($buf) {							
 					my $req = decode_request($buf);					# decode the client input & screen for garbage
 					if ($req) {
-
-						debug("$id : $req->{'method'}");
 
 						if ($req->{'method'} eq 'mining.subscribe') {		# connect to server
 							$client_info->{$id}->{'id'}  	  = $req->{'id'};
@@ -135,24 +126,19 @@ while($running) {											# main loop
 							if ($@) {						# it was garbage
 								
 								if ($resp eq 'inconclusive') {
-									debug("$id : inconclusive");
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
 								}
 								elsif ($resp eq 'invalid-solution') {
-									debug("$id : invalid_solution");
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
 								}
 								elsif ($resp eq 'high-hash') {
-									debug("$id : high-hash");
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
 								}
 								elsif ($resp eq '') {								# node accepts work quietly, it doesnt return a status
-									debug("$id : BLOCK FOUND ");
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
 								}
 
 								else {
-									debug("$id : ERROR: node_rpc said : $resp");
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# failure??? node complained but we didnt understand
 								}
 							}
@@ -163,22 +149,18 @@ while($running) {											# main loop
 								if ($response->{'content'}->{'result'}->{'height'} == ($block->{'current'} + 1) ) {	# WE MINED A BLOCK & have the template for the next one !
 									$block->{'current'} = $response->{'content'}->{'result'};
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");		# success??? tell the miner it was OK
-									debug("$id : BLOCK ACCEPTED!!");
 								}
 								else {
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");
-									debug("$id : BLOCK REJECTED!!");
 								}
 							}
 						}
 	
 						else {
-							debug("$id : ERROR: UNKNOWN STRATUM REQUEST");
 							disconnect_client($fh);
 						}
 					}
 					else {											# garbage (not valid JSON) from so we'll disconnect it
-						debug("$id : WARNING: GARBAGE JSON REQUEST : $buf");
 						disconnect_client($fh);
 					}
 				}
@@ -260,7 +242,6 @@ while($running) {											# main loop
 
 				if ( ($client_info->{$id}->{'mining'} == 0) && ($client_info->{$id}->{'ready'} == 1) && ($client_info->{$id}->{'auth'} == 1) ) {	
 
-					debug("$id : new work");
 					write_client($fh, "\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$work->{'worknumber'}\",\"$work->{'version'}\",\"$work->{'previousblockhash'}\",\"$work->{'merkleroot'}\",\"$work->{'finalsaplingroothash'}\",\"$work->{'time'}\",\"$work->{'bits'}\",true,\"ZcashPoW\"\]\}\n");	
 
 					$client_info->{$id}->{'mining'} = 1;						# tag miner as mining
@@ -270,7 +251,6 @@ while($running) {											# main loop
 				#
 				elsif ( ($client_info->{$id}->{'mining'} == 1) && ($work->{'blocknumber'} != $block->{'current'}->{'height'}) ) {
 
-					debug("$id : resetting target, ready");
 					write_client($fh, "\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
 					$client_info->{$id}->{'target'} = $block->{'current'}->{'target'};		# cache target
 					$client_info->{$id}->{'mining'} = 0;						# tag as idle
@@ -280,14 +260,13 @@ while($running) {											# main loop
 				# miner is authenticated but not ready, set the work target
 				#
 				elsif ( ($client_info->{$id}->{'mining'} == 0) && ($client_info->{$id}->{'ready'} == 0) && ($client_info->{$id}->{'auth'} == 1 ) ) {
-					debug("$id : setting target");
+
 					write_client($fh, "\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
 					$client_info->{$id}->{'target'} = $block->{'current'}->{'target'};		# cache target
 					$client_info->{$id}->{'ready'} = 1;						# tag miner as ready
 				}
 
 				elsif ( ($client_info->{$id}->{'mining'} == 1) && ((time - $client_info->{$id}->{'updated'}) > $conf->{'miner_timeout'}) ) {	# refresh current job to prevent timeout
-					debug("$id : refreshing work");
 
 					write_client($fh, "\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$work->{'worknumber'}\",\"$work->{'version'}\",\"$work->{'previousblockhash'}\",\"$work->{'merkleroot'}\",\"$work->{'finalsaplingroothash'}\",\"$work->{'time'}\",\"$work->{'bits'}\",false,\"ZcashPoW\"\]\}\n");	
 				}
@@ -457,7 +436,6 @@ sub new_work() {								# generate new mining task, all miners get the same task
 	$work->{'bits'}                 = reverse_bytes($block->{'current'}->{'bits'});				# bits (REVERSED)
 
 	++$work->{'worknumber'};										# increment clients work number
-	debug("new work : $work->{'worknumber'}");
 }
 
 sub hash_this {													# returns a sha256(sha256)) hash with optionial endian-ness
@@ -470,18 +448,8 @@ sub hash_this {													# returns a sha256(sha256)) hash with optionial endi
 	}
 }
 
-sub debug {
-
-	open (DEBUG, ">>/tmp/stratumsolo.log");
-	if ($config->{'debug'} > 0) {										# print the message (debug = 1)
-		print DEBUG "$_[0]\n";
-	}
-	close (DEBUG);
-}
-
 sub restart_miners {
 
-	debug("restarting all miners");
 	my @miner = $sel->can_write(0);										# get all active sockets with something to say
 	if (@miner) {
 		foreach my $fh (@miner) {
@@ -496,7 +464,6 @@ sub restart_miners {
 
 sub disconnect_all {
 
-	debug("disconnecting all miners");
 	my @miner = $sel->can_write(0);										# get all active sockets with something to say
 
 	if (@miner) {
@@ -510,7 +477,6 @@ sub disconnect_all {
 
 sub restart_all {									# reset all connected miners
 
-	debug("restarting all miners");
 	my @miner = $sel->can_write(0);							# get all active sockets with something to say
 
 	if (@miner) {
@@ -531,8 +497,6 @@ sub disconnect_client {
 
 	my $id = $client->{$_[0]->fileno};						# get client index id
 
-	debug("$id : disconnected");
-
 	delete $client->{$_[0]->fileno};						# remove from connection hash
 	delete $client_info->{$id};							# remove from client info hash
 	$sel->remove($_[0]);								# remove from active connections
@@ -543,7 +507,6 @@ sub disconnect_client {
 sub write_client {
 
 	my ($fh, $json) = @_;
-#	debug("$client->{$fh->fileno} : SEND: $json");
 
 	$fh->write($json);
 	$client_info->{ $client->{$fh->fileno} }->{'updated'} = time;			# reset updated timestamp

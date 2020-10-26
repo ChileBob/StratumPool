@@ -32,10 +32,10 @@ If you'd like to buy beers :-
 
 ## Usage :-
 
-stratumpool --port=3333 --password=notsecret
+stratumpool 
 
-* `--port (port number for miner connections, default 3333)`
-* `--password (optional password miners need to connect)`
+* `--port=3333 (port for miner connections, default 3333)`
+* `--password=notsecret (optional password miners need to connect, default not set)`
 
 stratumsolo (no config needed)
 
@@ -52,3 +52,19 @@ stratumsolo (no config needed)
 * exit
 
 * sudo cpan install POSIX IO::Handle IO::Socket IO::Select JSON	JSON::RPC::Client HTTP::Request JSON::Create Digest::SHA Data::Dumper
+
+
+## Important !!! Don't forget !!!
+
+You MUST add a line to your node configuration file (ycash.conf) to set a fixed mining address, ie :-
+
+mineraddress=s1youraddressgoeshere
+
+* This MUST be a transparent address (starts with 's1')
+* The address MUST belong to the node wallet (use 'ycash-cli getnewaddress')
+
+Before you can spend any coins you have mined, you must :-
+
+* Wait 100 blocks for the reward to mature.
+* Send the ENTIRE balance of the saddr to a yaddr you control. (Use YECwallet FullNode)
+

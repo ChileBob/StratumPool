@@ -9,7 +9,6 @@ use IO::Handle;
 use IO::Socket;
 use IO::Select;
 use JSON;					
-use JSON::RPC::Client;
 use HTTP::Request;					
 use JSON::Create 'create_json';
 use Digest::SHA qw(sha256);
@@ -137,7 +136,7 @@ while($running) {											# main loop
 								}
 							}
 	
-							my $resp = &node_rpc('validateaddress', [ "$req->{'params'}[0]" ] );	# validate the payment address
+							my $resp = node_rpc("validateaddress $req->{'params'}[0]" );		# validate the payment address
 							if ($resp->{'isvalid'}) {
 								$client_info->{$id}->{'auth'}    = 1;						# authenticated
 								$client_info->{$id}->{'address'} = $req->{'params'}[0];				# store payment address
@@ -169,7 +168,7 @@ while($running) {											# main loop
 							$rawblock .= $req->{'params'}[4];						# solution, as received from miner
 							$rawblock .= $client_info->{$id}->{'work'}->{'transactions'};	 		# add coinbase transaction
 
-							my $resp = &node_rpc('submitblock', [ "$rawblock" ] );				# submit the block
+							my $resp = node_rpc("submitblock $rawblock" );					# submit the block
 							my $eval = eval { decode_json($resp) };						# test for valid json response from server
 							if ($@) {									# it was garbage
 								
@@ -231,7 +230,7 @@ while($running) {											# main loop
 
 	if ( (time - $conf->{'node_check'}) > 1) {									# has more than one second passed since the last check
 		do { 
-			$block->{'template'} = &node_rpc('getblocktemplate');						# get a new block template from the node
+			$block->{'template'} = node_rpc('getblocktemplate');						# get a new block template from the node
 			if ( ref($block->{'template'}) ne 'HASH') {
 				print "Node is down, trying again in 5 seconds\n";
 				$conf->{'node_state'} = 0;								# tag node as being down
@@ -404,20 +403,14 @@ sub config_load {
 
 sub node_rpc {
 	
-	my $client = new JSON::RPC::Client;
+	my $resp = `ycash-cli $_[0] 2>&1`;
 
-	$client->ua->credentials( "localhost:$config->{'rpcport'}", 'jsonrpc', $config->{'rpcuser'}, $config->{'rpcpassword'} );
+	my $eval = eval { decode_json($resp) };
 
-	my $uri = "http://localhost:$config->{'rpcport'}/";
-	my $obj = { 'method' => $_[0], 'params' => @_[1] };
-
-	my $result = $client->call( $uri, $obj );								# get the result
-
-	if ($result) {				
-		return($result->{'content'}->{'result'});
+	if ($@) {
 	}
-	else {													# failed connection (can be node starting up)
-		return(0);
+	else {
+		return(decode_json($resp));
 	}
 }
 
@@ -525,12 +518,12 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 
 	$client_info->{$_[0]}->{'work'}->{'blocknumber'} = $block->{'current'}->{'height'};
 
-	my $decoded = &node_rpc('decoderawtransaction', [ "$block->{'current'}->{'coinbasetxn'}->{'data'}" ] );
+	my $decoded = node_rpc("decoderawtransaction $block->{'current'}->{'coinbasetxn'}->{'data'}" );
 	my $modified = $block->{'current'}->{'coinbasetxn'}->{'data'};
 	my $localscriptKey;
 
 	foreach my $vout (@{$decoded->{'vout'}}) {
-		my $detail = &node_rpc('validateaddress', [ "$vout->{'scriptPubKey'}->{'addresses'}[0]" ]);
+		my $detail = node_rpc("validateaddress $vout->{'scriptPubKey'}->{'addresses'}[0]" );
 		if ($detail->{'ismine'}) {
 			$localscriptKey = $detail->{'scriptPubKey'};
 		}

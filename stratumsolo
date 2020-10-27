@@ -9,9 +9,7 @@ use IO::Handle;
 use IO::Socket;
 use IO::Select;
 use JSON;					
-use HTTP::Request;					
 use Digest::SHA qw(sha256);
-use Data::Dumper;
 
 $SIG{INT} = \&shutdown;						# graceful shutdown, sends disconnect to all miners
 

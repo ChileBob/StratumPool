@@ -13,7 +13,7 @@ use Digest::SHA qw(sha256);
 
 $SIG{INT} = \&shutdown;						# graceful shutdown, sends disconnect to all miners
 
-my $version = "v0.1";						# Current version, because everything should have one of those
+my $version = "v0.11";						# Current version, because everything should have one of those
 
 my $config;							# These configs can be changed from the command line
 $config->{'port'}     = 3333;					# default listening port number

@@ -9,8 +9,6 @@ use IO::Handle;
 use IO::Socket;
 use IO::Select;
 use JSON;					
-use HTTP::Request;					
-use JSON::Create 'create_json';
 use Digest::SHA qw(sha256);
 
 $SIG{INT} = \&shutdown;						# graceful shutdown, sends disconnect to all miners

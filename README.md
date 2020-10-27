@@ -51,7 +51,7 @@ stratumsolo (no config needed)
 * reload
 * exit
 
-* sudo cpan install POSIX IO::Handle IO::Socket IO::Select JSON	JSON::RPC::Client HTTP::Request JSON::Create Digest::SHA Data::Dumper
+* sudo cpan install POSIX IO::Handle IO::Socket IO::Select JSON	Digest::SHA
 
 
 ## Important !!! Don't forget !!!

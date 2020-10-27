@@ -36,8 +36,6 @@ $conf->{'stats_refresh'} = 0;					# epoch of last stats display update
 
 my $block;							# hash for storing templates
 
-&config_load("$ENV{'HOME'}/.ycash/ycash.conf");			# load node config file so we can connect to the RPC server
-
 if (@ARGV) {							# parse command line
 	while (@ARGV) {
 		my $arg = shift @ARGV;
@@ -109,7 +107,7 @@ while($running) {											# main loop
 				my $buf = <$fh>;
 
 				if($buf) {							
-					my $req = &decode_request($buf);				# decode the client input & screen for garbage
+					my $req = decode_request($buf);				# decode the client input & screen for garbage
 					if ($req) {
 
 						if ($req->{'method'} eq 'mining.subscribe') {		# connect to server
@@ -352,7 +350,7 @@ while($running) {											# main loop
 				}
 	
 				$miner .= sprintf("%-17s", $client_info->{$id}->{'ipaddr'});
-				$miner .= sprintf("%-16s", &duration((time - $client_info->{$id}->{'connected'})));
+				$miner .= sprintf("%-16s", duration((time - $client_info->{$id}->{'connected'})));
 				$miner .= sprintf("%-6d", $client_info->{$id}->{'work_sent'});
 				$miner .= sprintf("%-6d", $client_info->{$id}->{'work_accepted'});
 				$miner .= sprintf("%-6d", $client_info->{$id}->{'work_rejected'});
@@ -381,24 +379,6 @@ sub decode_request {
 	else {													# it was json, so decode & return	
 		return(decode_json($_[0]));					
 	}
-}
-
-sub config_load {
-
-	open (CONFIG, "$_[0]") || die ("Cant open $_[0]");							# load/parse the config file
-	while (my $line = <CONFIG>) {
-		chop($line);
-		$line =~ s/\#.*//;										# strip comments
-		my @conf = split('=', $line);
-		$conf[0] =~ s/\s//g;										# strip whitespace from keyword
-		$conf[1] =~ s/\"//g;										# strip opening/closing double quotes on values
-		$conf[1] =~ s/^\s//g;										# strip leading whitespace on value
-		$conf[1] =~ s/\s*$//g;										# strip trailing whitespace on value
-		if ($conf[0]) {											# add to hash if keyword is valid
-			$config->{$conf[0]} = $conf[1];
-		}
-	}
-	close (CONFIG);
 }
 
 sub node_rpc {
@@ -432,7 +412,7 @@ sub int_to_hex {												# returns hex : uint32_le = &int_to_hex(integer, 32,
 	my $hex = sprintf("$template", $_[0]);									# convert integer to hex
 
 	if ($_[2] eq 'r') {											# reverse byte order
-		return(&reverse_bytes($hex));
+		return(reverse_bytes($hex));
 	}
 	return($hex);												# given byte order
 }
@@ -465,17 +445,17 @@ sub compact_size {												# generate compactSize string from integer (or hex
 	}
 	elsif ( ($length >= 253) && ($length <= 65535) ) {							# 16-bit, little-endian
 		$compact = sprintf("%04x", $length);
-		$compact = &reverse_bytes($compact);
+		$compact = reverse_bytes($compact);
 		return("fd$compact");
 	}
 	elsif ( ($length > 65556) && ($length <= 4294967295)) {							# 32-bit, little-endian
 		$compact = sprintf("%08x", $length);
-		$compact = &reverse_bytes($compact);
+		$compact = reverse_bytes($compact);
 		return("fe$compact");
 	}
 	else {													# 64-bit, little-endian
 		$compact = sprintf("%016x", $length);
-		$compact = &reverse_bytes($compact);
+		$compact = reverse_bytes($compact);
 		return("ff$compact");
 	}
 }
@@ -501,7 +481,7 @@ sub merkleroot {												# generate merkleroot from array-ref of transaction 
 		my @joinedHashes;
 
 		while (my @pair = splice @hashes, 0, 2) {							# get a pair of hashes
-			push @joinedHashes, &hash_this(&reverse_bytes("$pair[1]$pair[0]"), 'le');		# get the hash
+			push @joinedHashes, hash_this(reverse_bytes("$pair[1]$pair[0]"), 'le');			# get the hash
 		}
 		@hashes = @joinedHashes;									# replace hashes with joinedHashes
 	}
@@ -529,7 +509,7 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 		}
 	}
 	$modified =~ s/$localscriptKey/$client_info->{$_[0]}->{'scriptPubKey'}/;
-	my $newhash = &hash_this($modified, 'le');							# get the modified transaction hash
+	my $newhash = hash_this($modified, 'le');							# get the modified transaction hash
 
 	push @txid, $newhash;										# add modified transaction hash to txid array
 	$client_info->{$_[0]}->{'work'}->{'transactions'} = $modified;					# modified transaction raw data is the first one
@@ -541,14 +521,14 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 		$client_info->{$_[0]}->{'work'}->{'transaction_count'}++;				# increment count
 	}
 
-	$client_info->{$_[0]}->{'work'}->{'merkleroot'}           = &reverse_bytes(&merkleroot(\@txid));	# generate merkleroot
-	$client_info->{$_[0]}->{'work'}->{'transactions'}         = &compact_size($client_info->{$_[0]}->{'work'}->{'transaction_count'}) . $client_info->{$_[0]}->{'work'}->{'transactions'};
+	$client_info->{$_[0]}->{'work'}->{'merkleroot'}           = reverse_bytes(merkleroot(\@txid));	# generate merkleroot
+	$client_info->{$_[0]}->{'work'}->{'transactions'}         = compact_size($client_info->{$_[0]}->{'work'}->{'transaction_count'}) . $client_info->{$_[0]}->{'work'}->{'transactions'};
 	$client_info->{$_[0]}->{'work'}->{'target'}               = $block->{'current'}->{'target'};					# target (NOT REVERSED)
-	$client_info->{$_[0]}->{'work'}->{'version'}              = &int_to_hex($block->{'current'}->{'version'}, 32, 'r');		# version (REVERSED)
-	$client_info->{$_[0]}->{'work'}->{'previousblockhash'}    = &reverse_bytes($block->{'current'}->{'previousblockhash'});		# previous block hash (REVERSED)
-	$client_info->{$_[0]}->{'work'}->{'finalsaplingroothash'} = &reverse_bytes($block->{'current'}->{'finalsaplingroothash'});	# sapling root (REVERSED)
-	$client_info->{$_[0]}->{'work'}->{'time'}                 = &int_to_hex(time, 32, 'r');						# current timestamp, 32-bit, reversed (CONFIRMED)
-	$client_info->{$_[0]}->{'work'}->{'bits'}                 = &reverse_bytes($block->{'current'}->{'bits'});			# bits (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'version'}              = int_to_hex($block->{'current'}->{'version'}, 32, 'r');		# version (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'previousblockhash'}    = reverse_bytes($block->{'current'}->{'previousblockhash'});		# previous block hash (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'finalsaplingroothash'} = reverse_bytes($block->{'current'}->{'finalsaplingroothash'});	# sapling root (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'time'}                 = int_to_hex(time, 32, 'r');						# current timestamp, 32-bit, reversed (CONFIRMED)
+	$client_info->{$_[0]}->{'work'}->{'bits'}                 = reverse_bytes($block->{'current'}->{'bits'});			# bits (REVERSED)
 
 	++$client_info->{$_[0]}->{'work'}->{'worknumber'};										# increment clients work number
 }
@@ -556,13 +536,10 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 sub hash_this {													# returns a hash as big endian (Usage: "hex-encoded-string", 'le|be')
 
 	if ($_[1] eq 'le') {
-		return(&reverse_bytes(unpack("H*", sha256(sha256(pack "H*", $_[0])))));		
+		return(reverse_bytes(unpack("H*", sha256(sha256(pack "H*", $_[0])))));		
 	}
 	elsif ($_[1] eq 'be') {
 		return(unpack("H*", sha256(sha256(pack "H*", $_[0]))));			
-	}
-	else {
-		print "&hash_this( hex-string, \'le|be\');\n";
 	}
 }
 
@@ -577,7 +554,6 @@ sub duration {													# converts seconds into a sensible duration format
 		int ($sec/60) % 60 . 'm',
 		int ($sec) % 60 . 's';
 }
-
 
 sub restart_miners {
 

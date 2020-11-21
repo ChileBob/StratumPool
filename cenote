@@ -1,0 +1,613 @@
+#!/usr/bin/perl
+
+# Copyright (c) 2019 ChileBob : Released under MIT Licence
+
+use strict;
+
+use POSIX 'strftime';
+use IO::Handle;
+use IO::Socket;
+use IO::Select;
+use JSON;					
+use Digest::SHA qw(sha256);
+
+$SIG{INT} = \&shutdown;						# graceful shutdown, sends disconnect to all miners
+
+my $version = "v0.11";						# Current version, because everything should have one of those
+
+my $config;							# These configs can be changed from the command line
+$config->{'port'}     = 3334;					# default listening port number
+$config->{'password'} = '';					# default miner password
+$config->{'stats_refresh'} = 1;					# interval (seconds) to update stats display
+
+my $conf;							# Config settings that cant be changed via command line
+$conf->{'block_found'} = 0;					# blocks found so far this session
+$conf->{'miner_count'} = 0;					# number of connected miners
+$conf->{'miner_count_last'} = 0;				# previous count of connected miners
+$conf->{'nonce1_size'} = 16;					# this leaves 8 bytes of nonce for the miner to work through, its a lot!
+$conf->{'miner_timeout'} = 60;					# block timeout, work is resent to miners after this many seconds so they dont timeout
+$conf->{'block_start'} = 0;					# starting block for this session
+$conf->{'block_count'} = 0;					# count of blocks this session
+$conf->{'node_state'} = 1;					# node status, 1 = up, 0 = down
+$conf->{'node_check'} = 0;					# epoch of last time node was checked for new blocks
+$conf->{'stats_refresh'} = 0;					# epoch of last stats display update
+
+my $block;							# hash for storing templates
+
+if (@ARGV) {							# parse command line
+	while (@ARGV) {
+		my $arg = shift @ARGV;
+		if ($arg =~ m/-/) {
+			$arg =~ s/-//g;
+			$config->{$arg} = shift @ARGV;
+		}
+	}
+}
+
+#####################################################################################################################################################################################################
+# START THE DAEMON
+#####################################################################################################################################################################################################
+
+my $lsn = IO::Socket::INET->new (									# open network socket (non blocking)
+	LocalPort => "$config->{'port'}",
+	Proto => 'tcp',
+	Listen => SOMAXCONN,										# allow maximum number of connections (65535), which is silly
+	Reuse => 1,
+	Blocking => 0
+);
+die "FATAL: Cannot create socket on port $config->{'port'}\n" unless $lsn;				# die if we cant open a socket (ie: daemon already running)
+
+my $sel = IO::Select->new($lsn);									# list of sockets that we listen to 
+my $running = 1;											# runtime flag
+
+my $client;												# hash of hashes, client network config goes here
+my %client;
+my $client_number = 0;
+my $client_info;
+
+$block->{'current'}->{'height'} = 0;									# start condition, lets pretend we're at block 0
+
+while($running) {											# main loop
+
+	my @ready = $sel->can_read(0);									# get all active sockets with something to say
+	my @total = $sel->can_write(0);									# get all active sockets with something to say
+
+	my $miners_connected = (scalar @total);
+
+	if (@ready) {
+
+		foreach my $fh (@ready) {
+			if ($fh == $lsn) {								# master socket, accepts new connections
+				my $new = $lsn->accept;							# accept the connection
+				$sel->add($new);							# add connection to active list
+				$client->{$new->fileno} = $client_number;				# track the client by connecting socket
+
+				$client_info->{$client_number}->{'fileno'} = $new->fileno;		# file handler
+				$client_info->{$client_number}->{'ipaddr'} = $new->peerhost;		# client IP address
+				$client_info->{$client_number}->{'auth'} = 0;				# 1 = authorized, 0 = idle
+				$client_info->{$client_number}->{'mining'} = 0;				# 1 = mining, 0 = idle
+				$client_info->{$client_number}->{'ready'} = 0;				# 1 = mining, 0 = idle
+				$client_info->{$client_number}->{'block'} = 0;				# blocknumber sent to miner
+				$client_info->{$client_number}->{'address'} = '';			# username (client payment address)
+				$client_info->{$client_number}->{'scriptPubKey'} = '';			# public key for payment address
+				$client_info->{$client_number}->{'password'} = '';			# password (not used)
+				$client_info->{$client_number}->{'nonce1_size'} = $conf->{'nonce1_size'};	# default size of nonce1
+				$client_info->{$client_number}->{'work_sent'} = 0;			# worker statistics
+				$client_info->{$client_number}->{'work_rejected'} = 0;			# 
+				$client_info->{$client_number}->{'work_accepted'} = 0;			#
+				$client_info->{$client_number}->{'connected'} = time;			#
+				$client_info->{$client_number}->{'updated'} = time;			# time of last update
+
+				$client_number++;							# increment client index number for next client
+			}
+			else {										# client socket
+				my $id = $client->{$fh->fileno};					# get client index id
+				my $buf = <$fh>;
+
+				if($buf) {							
+					my $req = decode_request($buf);				# decode the client input & screen for garbage
+					if ($req) {
+
+						if ($req->{'method'} eq 'mining.subscribe') {		# connect to server
+							$client_info->{$id}->{'id'}  	  = $req->{'id'};
+							$client_info->{$id}->{'software'} = $req->{'params'}[0];		# clients mining software
+							$client_info->{$id}->{'port'}     = $req->{'params'}[3];		# connecting port number
+																# generate nonce for this client	
+							$client_info->{$id}->{'work'}->{'nonce1'}   = sprintf("%04x", $id) . newkey($client_info->{$id}->{'nonce1_size'} - 4);	
+
+																# send response
+							write_client($fh, "\{\"id\":$req->{'id'},\"result\":\[null,\"$client_info->{$id}->{'work'}->{'nonce1'}\"\],\"error\":null\}\n");
+
+						}
+
+						elsif ($req->{'method'} eq 'mining.authorize') {				# authorize client
+							$client_info->{$id}->{'address'}  = $req->{'params'}[0];		# username, used for a payment address
+							$client_info->{$id}->{'password'} = $req->{'params'}[1];		# password, not used but we'll store it anyway
+
+							if ($config->{'password'}) {						# check password (if required)
+								if ($client_info->{$id}->{'password'} ne $config->{'password'}) {
+
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false,\"error\": \"Auth Failed\"}\n");
+									disconnect_client($fh);
+								}
+							}
+	
+							my $resp = node_rpc("validateaddress $req->{'params'}[0]" );		# validate the payment address
+							if ($resp->{'isvalid'}) {
+								$client_info->{$id}->{'auth'}    = 1;						# authenticated
+								$client_info->{$id}->{'address'} = $req->{'params'}[0];				# store payment address
+								$client_info->{$id}->{'scriptPubKey'} = $resp->{'scriptPubKey'};		# store scriptPubKey
+
+								write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# tell client they're authorized
+							}
+							else {
+								write_client($fh, "\{\"id\":$req->{'id'},\"result\": false,\"error\": \"Invalid address\"}\n");	# auth failed
+								disconnect_client($fh);
+							}
+						}
+
+						elsif ($req->{'method'} eq 'mining.extranonce.subscribe') {				# request a nonce? or just let us know that it can do that?
+							write_client($fh, "\{\"id\":$req->{'id'},\"result\": true,\"error\": null}\n");	# success
+						}
+	
+						elsif ($req->{'method'} eq 'mining.submit') {						# submitting work
+							$client_info->{$id}->{'mining'} = 0;						# tag miner as done so it gets a new job
+							$client_info->{$id}->{'ready'}  = 0;						# tag miner as not ready so it gets a new target
+
+							my $rawblock = $client_info->{$id}->{'work'}->{'version'};
+							$rawblock .= $client_info->{$id}->{'work'}->{'previousblockhash'};		# previousblockhash (NOT REVERSED)
+							$rawblock .= $client_info->{$id}->{'work'}->{'merkleroot'};			# merkleroot (NOT REVERSED)
+							$rawblock .= $client_info->{$id}->{'work'}->{'finalsaplingroothash'};		# saplingroot (NOT REVERSED)
+							$rawblock .= $req->{'params'}[2];						# timestamp, 32-bit little-endian, as received from miner
+							$rawblock .= $client_info->{$id}->{'work'}->{'bits'};				# bits (NOT REVERSED)
+							$rawblock .= "$client_info->{$id}->{'work'}->{'nonce1'}$req->{'params'}[3]";	# nonce (NOT REVERSED)
+							$rawblock .= $req->{'params'}[4];						# solution, as received from miner
+							$rawblock .= $client_info->{$id}->{'work'}->{'transactions'};	 		# add coinbase transaction
+
+							my $resp = node_rpc("submitblock $rawblock" );					# submit the block
+							my $eval = eval { decode_json($resp) };						# test for valid json response from server
+							if ($@) {									# it was garbage
+								
+								if ($resp eq 'inconclusive') {
+									$client_info->{$id}->{'work_rejected'}++;
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
+								}
+								elsif ($resp eq 'invalid-solution') {
+									$client_info->{$id}->{'work_rejected'}++;
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
+								}
+								elsif ($resp eq 'high-hash') {
+									$client_info->{$id}->{'work_rejected'}++;
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# reject work
+								}
+								elsif ($resp eq '') {							# node accepts work quietly, it doesnt return a status
+									$client_info->{$id}->{'work_accepted'}++;
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
+									$conf->{'block_found'}++;
+								}
+
+								else {
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");	# failure??? node complained but we didnt understand
+									$client_info->{$id}->{'work_rejected'}++;
+								}
+							}
+							else {										# it was json, so decode & return	
+
+								my $response = decode_json($resp);					
+
+								if ($response->{'content'}->{'result'}->{'height'} == ($block->{'current'} + 1) ) {	# WE MINED A BLOCK & have the template for the next one !
+									$block->{'current'} = $response->{'content'}->{'result'};
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK
+								}
+								else {
+									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");
+								}
+							}
+						}
+						else {
+							disconnect_client($fh);
+						}
+					}
+					else {											# garbage (not valid JSON) from so we'll disconnect it
+						disconnect_client($fh);
+					}
+				}
+				else {												# disconnect client
+					disconnect_client($fh);
+				}
+			}
+		}
+	}
+	else {														# nothing to do, so sleep a while to avoid beating up the server
+		select(undef, undef, undef, 0.05);									# 50 millisecond power-nap :-)
+	}
+
+	$conf->{'node_state'} = 1;											# assume node is up
+
+	if ( (time - $conf->{'node_check'}) > 1) {									# has more than one second passed since the last check
+		do { 
+			$block->{'template'} = node_rpc('getblocktemplate');						# get a new block template from the node
+			if ( ref($block->{'template'}) ne 'HASH') {
+				print "Node is down, trying again in 5 seconds\n";
+				$conf->{'node_state'} = 0;								# tag node as being down
+				sleep(5);
+			}
+		} while ( ref($block->{'template'}) ne 'HASH');
+		$conf->{'node_check'} = time;										# reset node_check to current time
+	}
+
+	if ($conf->{'node_state'} == 0) {										# if this is zero, the node was down so all miners need new work 
+		restart_miners();
+	}
+
+	if ($conf->{'block_start'} == 0) {										# log block height for session start
+		$conf->{'block_start'} = $block->{'template'}->{'height'};			
+	}
+
+	my $flag_newblock = 0;												# clear the newblock flag
+
+	if ( $block->{'template'}->{'height'} != $block->{'current'}->{'height'} ) {					# new block arrived, send new work
+		$flag_newblock = 1;
+	}
+
+	if ( ($block->{'template'}->{'target'} ne $block->{'current'}->{'target'}) ) {					# block target has changed, send new work
+		$flag_newblock = 1;
+	}
+
+	if ( ($block->{'template'}->{'finalsaplingroothash'} ne $block->{'current'}->{'finalsaplingroothash'}) ) {	# node saplingroot changed, send new work
+		$flag_newblock = 1;
+	}
+
+	if ($flag_newblock == 1) {											# force all miners to start a new job
+		$block->{'current'} = $block->{'template'};								# use the fresh block template
+		$conf->{'block_count'}++;
+
+		@ready = $sel->can_write(0);										# get all connected miners
+		foreach my $fh (@ready) {						
+			if ($fh != $lsn) {										# ensure we're only talking to clients
+				if ($flag_newblock) {
+					my $id = $client->{$fh->fileno};						# get client index id
+					$client_info->{$id}->{'mining'} = 0;						# tag as idle
+					$client_info->{$id}->{'ready'}  = 0;						# tag as needing a target update
+				}
+			}
+		}
+	}
+
+	my @active = $sel->can_write(0);										# get all active sockets 
+	if (@active) {													# send work/updates to all miners
+
+		$conf->{'miner_count'} = (scalar @active);								# update the miner count
+		if ($conf->{'miner_count'} != $conf->{'miner_count_last'}) {
+			$conf->{'miner_count_last'} = $conf->{'miner_count'};
+		}
+
+		foreach my $fh (@active) {						
+			if ($fh != $lsn) {										# ensure we're only talking to clients
+				my $id = $client->{$fh->fileno};							# get client index id
+
+				if ( ($client_info->{$id}->{'mining'} == 0) && ($client_info->{$id}->{'ready'} == 1) && ($client_info->{$id}->{'auth'} == 1) ) {	
+					new_work($id);			
+
+					write_client($fh, "\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$client_info->{$id}->{'work'}->{'worknumber'}\",\"$client_info->{$id}->{'work'}->{'version'}\",\"$client_info->{$id}->{'work'}->{'previousblockhash'}\",\"$client_info->{$id}->{'work'}->{'merkleroot'}\",\"$client_info->{$id}->{'work'}->{'finalsaplingroothash'}\",\"$client_info->{$id}->{'work'}->{'time'}\",\"$client_info->{$id}->{'work'}->{'bits'}\",true,\"ZcashPoW\"\]\}\n");	
+
+					$client_info->{$id}->{'mining'} = 1;					# tag miner as mining
+				}
+
+				# miner is working on an old block, set the current target & tag as idle so it gets the next update
+				#
+				elsif ( ($client_info->{$id}->{'mining'} == 1) && ($client_info->{$id}->{'work'}->{'blocknumber'} != $block->{'current'}->{'height'}) ) {
+
+					if ($client_info->{$id}->{'target'} ne $block->{'current'}->{'target'}) {	# check to see if target needs updating
+						write_client($fh, "\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
+						$client_info->{$id}->{'target'} = $block->{'current'}->{'target'};	# cache target
+
+					}
+					$client_info->{$id}->{'mining'} = 0;						# tag as idle
+					$client_info->{$id}->{'ready'}  = 0;						# tag as needing fresh target
+				}
+
+				# miner is authenticated & not ready, set the work target
+				#
+				elsif ( ($client_info->{$id}->{'mining'} == 0) && ($client_info->{$id}->{'ready'} == 0) && ($client_info->{$id}->{'auth'} == 1 ) ) {
+					write_client($fh, "\{\"id\":null,\"method\":\"mining.set_target\",\"params\":\[\"$block->{'current'}->{'target'}\"\]\}\n");
+					$client_info->{$id}->{'target'} = $block->{'current'}->{'target'};		# cache target
+					$client_info->{$id}->{'ready'} = 1;						# tag miner as ready
+				}
+
+				elsif ( ($client_info->{$id}->{'mining'} == 1) && ((time - $client_info->{$id}->{'updated'}) > $conf->{'miner_timeout'}) ) {	# refresh current job to prevent timeout
+					write_client($fh, "\{\"id\":null,\"method\":\"mining.notify\",\"params\":\[\"$client_info->{$id}->{'work'}->{'worknumber'}\",\"$client_info->{$id}->{'work'}->{'version'}\",\"$client_info->{$id}->{'work'}->{'previousblockhash'}\",\"$client_info->{$id}->{'work'}->{'merkleroot'}\",\"$client_info->{$id}->{'work'}->{'finalsaplingroothash'}\",\"$client_info->{$id}->{'work'}->{'time'}\",\"$client_info->{$id}->{'work'}->{'bits'}\",false,\"ZcashPoW\"\]\}\n");	
+				}
+			}
+		}
+	}
+
+	if ( (time - $conf->{'stats_refresh'}) >= $config->{'stats_refresh'}) {						# see if its time to update the stats display
+
+		$conf->{'stats_refresh'} = time;
+	
+		my $found_percent = '0.00%';
+		if ($conf->{'block_count'} > 1) {
+			$found_percent = sprintf("%.2f\%", (($conf->{'block_found'}/($conf->{'block_count'} - 1))*100) );
+		}
+
+		my $status = "Cenote $version : Port $config->{'port'} : TotalBlk $conf->{'block_found'}=$found_percent : Mining $block->{'template'}->{'height'}";
+		$status .= " : Miners " . (scalar @active);								# add count of connected miners
+		$status .= "\n\n";
+	
+		foreach my $fh (@active) {										# add detail of each connected miner
+			my $miner = '';
+			if ($fh != $lsn) {										# ensure we're only talking to clients
+				my $id = $client->{$fh->fileno};							# get client index id
+	
+				if ( $client_info->{$id}->{'mining'} == 1) {
+					$miner = sprintf("%04d  ACTIVE  ", $id);
+				}
+				else {
+					$miner = sprintf("%04d  IDLE    ", $id);
+				}
+	
+				$miner .= sprintf("%-17s", $client_info->{$id}->{'ipaddr'});
+				$miner .= sprintf("%-16s", duration((time - $client_info->{$id}->{'connected'})));
+				$miner .= sprintf("%-6d", $client_info->{$id}->{'work_sent'});
+				$miner .= sprintf("%-6d", $client_info->{$id}->{'work_accepted'});
+				$miner .= sprintf("%-6d", $client_info->{$id}->{'work_rejected'});
+				$miner .= sprintf("%-37s", $client_info->{$id}->{'address'});	
+				$miner .= $client_info->{$id}->{'software'};
+			}
+			$status .= "$miner\n";
+		}
+		
+		print "\033[2J";											# clear terminal
+		print "\033[0;0H";											# move to top of screen
+		print "$status";
+	}
+}
+
+print "\nBye!\n";
+exit;
+
+
+sub decode_request {
+
+	my $eval = eval { decode_json($_[0]) };									# test for valid json string
+	if ($@) {												# it was garbage
+		return(0);
+	}
+	else {													# it was json, so decode & return	
+		return(decode_json($_[0]));					
+	}
+}
+
+sub node_rpc {
+	
+	my $resp = `ycash-cli $_[0] 2>&1`;
+
+	my $eval = eval { decode_json($resp) };
+
+	if ($@) {
+	}
+	else {
+		return(decode_json($resp));
+	}
+}
+
+sub newkey {	
+
+	my $length = $_[0] * 2;	
+	my @chars = ();
+	my $key = '';
+
+	@chars = ('a'..'f', '0'..'9');
+	$key .= $chars[rand @chars] for 1..$length;			
+	return($key);
+}
+
+sub int_to_hex {												# returns hex : uint32_le = &int_to_hex(integer, 32, 'r')
+
+	my $places = $_[1] / 4;											# length of hex (bytes)
+	my $template = "\%0$places" . 'x';									# template for sprintf conversion
+	my $hex = sprintf("$template", $_[0]);									# convert integer to hex
+
+	if ($_[2] eq 'r') {											# reverse byte order
+		return(reverse_bytes($hex));
+	}
+	return($hex);												# given byte order
+}
+
+sub reverse_bytes {												# reverse byte order of hex-encoded string
+	my $hex = '';
+	my $bytes = length($_[0]);
+	while ($bytes > 0) {
+		$hex .= substr($_[0], ($bytes - 2), 2);
+		$bytes -= 2;
+	}
+	return($hex);
+}
+
+sub compact_size {												# generate compactSize string from integer (or hex-encoded data if $_[2] = 's'
+
+	my $length;
+	my $compact = '';
+
+	if ($_[1] eq 's') {
+		$length = length($_[0]) / 2;									# hex string, convert to length in bytes
+	}
+	else {													# integer 
+		$length = $_[0];
+	}
+
+	if ($length < 253) {											# 8-bit
+		$compact = sprintf("%02x", $length);
+	        return($compact);
+	}
+	elsif ( ($length >= 253) && ($length <= 65535) ) {							# 16-bit, little-endian
+		$compact = sprintf("%04x", $length);
+		$compact = reverse_bytes($compact);
+		return("fd$compact");
+	}
+	elsif ( ($length > 65556) && ($length <= 4294967295)) {							# 32-bit, little-endian
+		$compact = sprintf("%08x", $length);
+		$compact = reverse_bytes($compact);
+		return("fe$compact");
+	}
+	else {													# 64-bit, little-endian
+		$compact = sprintf("%016x", $length);
+		$compact = reverse_bytes($compact);
+		return("ff$compact");
+	}
+}
+
+sub merkleroot {												# generate merkleroot from array-ref of transaction ids
+
+	my @hashes = ();
+
+	foreach (@{$_[0]}) {											# dereference, data is hex-encoded
+		push @hashes, $_;										# txids are little-endian
+	}
+
+	if ( (scalar @hashes) == 1 ) {										# if its an empty block (1 tx)
+		return($hashes[0]);										# return coinbase txn hash as merkleroot
+	}
+
+	while ((scalar @hashes) > 1) {										# loop through array until there's only one value left
+
+		if ( ((scalar @hashes) % 2) != 0 )  {								# duplicate last hash if there's an odd number
+			push @hashes, $hashes[((scalar @hashes) - 1)];
+		}
+
+		my @joinedHashes;
+
+		while (my @pair = splice @hashes, 0, 2) {							# get a pair of hashes
+			push @joinedHashes, hash_this(reverse_bytes("$pair[1]$pair[0]"), 'le');			# get the hash
+		}
+		@hashes = @joinedHashes;									# replace hashes with joinedHashes
+	}
+	return($hashes[0]);											# returns hex-encoded big-endian
+}
+
+
+sub new_work() {												# generate mining task for a client : &newjob(client_id)
+
+	$client_info->{$_[0]}->{'work_sent'}++;
+
+	my @txid = ();
+	my @txraw = ();
+
+	$client_info->{$_[0]}->{'work'}->{'blocknumber'} = $block->{'current'}->{'height'};
+
+	my $decoded = node_rpc("decoderawtransaction $block->{'current'}->{'coinbasetxn'}->{'data'}" );
+	my $modified = $block->{'current'}->{'coinbasetxn'}->{'data'};
+	my $localscriptKey;
+
+	foreach my $vout (@{$decoded->{'vout'}}) {
+		my $detail = node_rpc("validateaddress $vout->{'scriptPubKey'}->{'addresses'}[0]" );
+		if ($detail->{'ismine'}) {
+			$localscriptKey = $detail->{'scriptPubKey'};
+		}
+	}
+	$modified =~ s/$localscriptKey/$client_info->{$_[0]}->{'scriptPubKey'}/;
+
+	# set claimed reward to zero
+	$modified =~ s/10366423/00000000/;	# post-halving
+	$modified =~ s/e0cfc746/00000000/;	# pre-halving
+
+	my $newhash = hash_this($modified, 'le');							# get the modified transaction hash
+
+	push @txid, $newhash;										# add modified transaction hash to txid array
+	$client_info->{$_[0]}->{'work'}->{'transactions'} = $modified;					# modified transaction raw data is the first one
+	$client_info->{$_[0]}->{'work'}->{'transaction_count'} = 1;
+
+	foreach my $tx ( @{$block->{'current'}->{'transactions'}} ) {					# add all the other transaction
+		push @txid, $tx->{'hash'};								# add to txid
+		$client_info->{$_[0]}->{'work'}->{'transactions'} .= $tx->{'data'};			# add to transaction raw data
+		$client_info->{$_[0]}->{'work'}->{'transaction_count'}++;				# increment count
+	}
+
+	$client_info->{$_[0]}->{'work'}->{'merkleroot'}           = reverse_bytes(merkleroot(\@txid));	# generate merkleroot
+	$client_info->{$_[0]}->{'work'}->{'transactions'}         = compact_size($client_info->{$_[0]}->{'work'}->{'transaction_count'}) . $client_info->{$_[0]}->{'work'}->{'transactions'};
+	$client_info->{$_[0]}->{'work'}->{'target'}               = $block->{'current'}->{'target'};					# target (NOT REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'version'}              = int_to_hex($block->{'current'}->{'version'}, 32, 'r');		# version (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'previousblockhash'}    = reverse_bytes($block->{'current'}->{'previousblockhash'});		# previous block hash (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'finalsaplingroothash'} = reverse_bytes($block->{'current'}->{'finalsaplingroothash'});	# sapling root (REVERSED)
+	$client_info->{$_[0]}->{'work'}->{'time'}                 = int_to_hex(time, 32, 'r');						# current timestamp, 32-bit, reversed (CONFIRMED)
+	$client_info->{$_[0]}->{'work'}->{'bits'}                 = reverse_bytes($block->{'current'}->{'bits'});			# bits (REVERSED)
+
+	++$client_info->{$_[0]}->{'work'}->{'worknumber'};										# increment clients work number
+}
+
+sub hash_this {													# returns a hash as big endian (Usage: "hex-encoded-string", 'le|be')
+
+	if ($_[1] eq 'le') {
+		return(reverse_bytes(unpack("H*", sha256(sha256(pack "H*", $_[0])))));		
+	}
+	elsif ($_[1] eq 'be') {
+		return(unpack("H*", sha256(sha256(pack "H*", $_[0]))));			
+	}
+}
+
+sub duration {													# converts seconds into a sensible duration format
+
+	my $sec = shift;
+
+	return join ' ', grep {$_ > 0}
+		int ($sec/60/60/24/7) . 'w',
+		int ($sec/60/60/24) % 7 . 'd',
+		int ($sec/60/60) % 24 . 'h',
+		int ($sec/60) % 60 . 'm',
+		int ($sec) % 60 . 's';
+}
+
+sub restart_miners {
+
+	my @miner = $sel->can_write(0);										# get all active sockets with something to say
+	if (@miner) {
+		foreach my $fh (@miner) {
+			if ($fh != $lsn) {									# leave the master socket
+				my $id = $client->{$fh->fileno};						# get client index id
+				$client_info->{$id}->{'mining'} = 0;						# tag as idle
+				$client_info->{$id}->{'ready'}  = 0;						# tag as needing a target update
+			}
+		}
+	}
+}
+
+sub disconnect_all {
+
+	my @miner = $sel->can_write(0);										# get all active sockets with something to say
+
+	if (@miner) {
+
+		foreach my $fh (@miner) {
+			if ($fh != $lsn) {									# leave the master socket
+				disconnect_client($fh);
+			}
+		}
+	}
+}
+
+sub disconnect_client {
+
+	my $id = $client->{$_[0]->fileno};						# get client index id
+
+	delete $client->{$_[0]->fileno};						# remove from connection hash
+	delete $client_info->{$id};							# remove from client info hash
+	$sel->remove($_[0]);								# remove from active connections
+	$_[0]->shutdown(2);								# close socket
+}
+
+sub write_client {
+
+	my ($fh, $json) = @_;
+
+	$fh->write($json);
+	$client_info->{ $client->{$fh->fileno} }->{'updated'} = time;			# reset updated timestamp
+}
+
+sub shutdown {
+
+	disconnect_all();
+	close($lsn);
+	exit(0);
+}
+

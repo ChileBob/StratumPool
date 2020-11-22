@@ -19,6 +19,7 @@ my $config;							# These configs can be changed from the command line
 $config->{'port'}     = 3334;					# default listening port number
 $config->{'password'} = '';					# default miner password
 $config->{'stats_refresh'} = 1;					# interval (seconds) to update stats display
+$config->{'cenote'} = 2;					# number of blocks to burn !
 
 my $conf;							# Config settings that cant be changed via command line
 $conf->{'block_found'} = 0;					# blocks found so far this session
@@ -43,6 +44,7 @@ if (@ARGV) {							# parse command line
 		}
 	}
 }
+
 
 #####################################################################################################################################################################################################
 # START THE DAEMON
@@ -184,6 +186,10 @@ while($running) {											# main loop
 									$client_info->{$id}->{'work_accepted'}++;
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
 									$conf->{'block_found'}++;
+
+									if ($config->{'cenote'} > 0) {					# tribute to the gods
+										$config->{'cenote'}--;
+									}
 								}
 
 								else {
@@ -198,6 +204,10 @@ while($running) {											# main loop
 								if ($response->{'content'}->{'result'}->{'height'} == ($block->{'current'} + 1) ) {	# WE MINED A BLOCK & have the template for the next one !
 									$block->{'current'} = $response->{'content'}->{'result'};
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK
+
+									if ($config->{'cenote'} > 0) {					# tribute to the gods
+										$config->{'cenote'}--;
+									}
 								}
 								else {
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": false\}\n");
@@ -498,19 +508,25 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 
 	my $decoded = node_rpc("decoderawtransaction $block->{'current'}->{'coinbasetxn'}->{'data'}" );
 	my $modified = $block->{'current'}->{'coinbasetxn'}->{'data'};
+	
 	my $localscriptKey;
-
+	my $valueSat;
 	foreach my $vout (@{$decoded->{'vout'}}) {
 		my $detail = node_rpc("validateaddress $vout->{'scriptPubKey'}->{'addresses'}[0]" );
 		if ($detail->{'ismine'}) {
 			$localscriptKey = $detail->{'scriptPubKey'};
+			$valueSat = valuesat_hex($vout->{'valueSat'});
 		}
 	}
-	$modified =~ s/$localscriptKey/$client_info->{$_[0]}->{'scriptPubKey'}/;
 
-	# set claimed reward to zero
-	$modified =~ s/10366423/00000000/;	# post-halving
-	$modified =~ s/e0cfc746/00000000/;	# pre-halving
+	if ($config->{'cenote'} > 0) {									# set output value to ZERO if we are burning this reward
+		my $search = $valueSat . '19' . $localscriptKey;
+		my $replace = '000000000000000019' . $client_info->{$_[0]}->{'scriptPubKey'};
+		$modified =~ s/$search/$replace/;
+	}
+	else {												# set payment addr only
+		$modified =~ s/$localscriptKey/$client_info->{$_[0]}->{'scriptPubKey'}/;
+	}
 
 	my $newhash = hash_this($modified, 'le');							# get the modified transaction hash
 
@@ -609,5 +625,12 @@ sub shutdown {
 	disconnect_all();
 	close($lsn);
 	exit(0);
+}
+
+sub valuesat_hex {
+
+	my $inthex = sprintf("%016x",$_[0]);
+
+	return(reverse_bytes($inthex));
 }
 

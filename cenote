@@ -19,7 +19,9 @@ my $config;							# These configs can be changed from the command line
 $config->{'port'}     = 3334;					# default listening port number
 $config->{'password'} = '';					# default miner password
 $config->{'stats_refresh'} = 1;					# interval (seconds) to update stats display
-$config->{'cenote'} = 2;					# number of blocks to burn !
+$config->{'cenote'} = 0;					# number of blocks to burn !
+$config->{'scrooge'} = 0;					# force all workers to mine for the pool addr
+$config->{'text'} = "ChileBob on brink of second tequila";	# Default text for coinbase transaction
 
 my $conf;							# Config settings that cant be changed via command line
 $conf->{'block_found'} = 0;					# blocks found so far this session
@@ -343,6 +345,15 @@ while($running) {											# main loop
 
 		my $status = "Cenote $version : Port $config->{'port'} : TotalBlk $conf->{'block_found'}=$found_percent : Mining $block->{'template'}->{'height'}";
 		$status .= " : Miners " . (scalar @active);								# add count of connected miners
+
+		if ($config->{'cenote'} > 0) {
+			$status .= " : SACRIFICING";
+		}
+
+		if ($config->{'scrooge'} > 0) {
+			$status .= " : CLAIMING ALL";
+		}
+
 		$status .= "\n\n";
 	
 		foreach my $fh (@active) {										# add detail of each connected miner
@@ -506,9 +517,20 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 
 	$client_info->{$_[0]}->{'work'}->{'blocknumber'} = $block->{'current'}->{'height'};
 
-	my $decoded = node_rpc("decoderawtransaction $block->{'current'}->{'coinbasetxn'}->{'data'}" );
-	my $modified = $block->{'current'}->{'coinbasetxn'}->{'data'};
-	
+	my $coinbase = substr($block->{'current'}->{'coinbasetxn'}->{'data'},0,90);	# get first 90 chars of coinbasetxn
+
+	my $coinbase_script = substr($block->{'current'}->{'coinbasetxn'}->{'data'},92,10) . unpack('H*',$config->{'text'});	# new coinbase script 
+
+	my $coinbase_script_size = sprintf("%02x", length($coinbase_script)/2);							# size
+
+	$coinbase .= $coinbase_script_size;
+	$coinbase .= $coinbase_script;
+       	$coinbase .= substr($block->{'current'}->{'coinbasetxn'}->{'data'},102);
+
+	my $decoded = node_rpc("decoderawtransaction $coinbase" );
+	#	my $modified = $block->{'current'}->{'coinbasetxn'}->{'data'};
+	my $modified = $coinbase;
+
 	my $localscriptKey;
 	my $valueSat;
 	foreach my $vout (@{$decoded->{'vout'}}) {
@@ -524,10 +546,9 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 		my $replace = '000000000000000019' . $client_info->{$_[0]}->{'scriptPubKey'};
 		$modified =~ s/$search/$replace/;
 	}
-	else {												# set payment addr only
+	elsif ($config->{'scrooge'} == 0) {								# scrooge mode forces all miners to use the pool addr
 		$modified =~ s/$localscriptKey/$client_info->{$_[0]}->{'scriptPubKey'}/;
 	}
-
 	my $newhash = hash_this($modified, 'le');							# get the modified transaction hash
 
 	push @txid, $newhash;										# add modified transaction hash to txid array
@@ -633,4 +654,24 @@ sub valuesat_hex {
 
 	return(reverse_bytes($inthex));
 }
+
+
+#coinbasetxn
+#0400									(version)
+#0080									(flags)
+#85202f89								(versiongroupid - rev)
+#01									(txin count)
+#0000000000000000000000000000000000000000000000000000000000000000	(txin prevout hash)
+#ffffffff								(txin prevout index)
+#05									(length of coinbase script in bytes)
+#03									(skip three bytes)
+#1e1e0d00								(block number - rev)
+#
+#ffffffff								(sequence)
+#
+#02000f642300000000							# outputs
+#1976a914e8abc76c8dde26f2bc18ecf279ce922810fb2a0d88ac
+#50d6dc0100000000
+#1976a914ef86586fcd9f9d806271613e425aaf063364d82488ac
+#00000000000000000000000000000000000000
 

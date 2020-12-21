@@ -13,13 +13,13 @@ use Digest::SHA qw(sha256);
 
 $SIG{INT} = \&shutdown;						# graceful shutdown, sends disconnect to all miners
 
-my $version = "v0.11";						# Current version, because everything should have one of those
+my $version = "v0.12-dev";					# Current version, because everything should have one of those
 
 my $config;							# These configs can be changed from the command line
 $config->{'port'}     = 3334;					# default listening port number
 $config->{'password'} = '';					# default miner password
 $config->{'stats_refresh'} = 1;					# interval (seconds) to update stats display
-$config->{'cenote'} = 0;					# number of blocks to burn !
+$config->{'sacrifice'} = 0;					# number of blocks to burn !
 $config->{'scrooge'} = 0;					# force all workers to mine for the pool addr
 $config->{'text'} = "ChileBob on brink of second tequila";	# Default text for coinbase transaction
 
@@ -45,6 +45,10 @@ if (@ARGV) {							# parse command line
 			$config->{$arg} = shift @ARGV;
 		}
 	}
+}
+
+if (-z $config->{'text'}) {					# set default coinbase text 
+       $config->{'text'} = 'ChileBob on brink of second tequila';
 }
 
 
@@ -189,8 +193,8 @@ while($running) {											# main loop
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK even though the node didnt confirm
 									$conf->{'block_found'}++;
 
-									if ($config->{'cenote'} > 0) {					# tribute to the gods
-										$config->{'cenote'}--;
+									if ($config->{'sacrifice'} > 0) {					# tribute to the gods
+										$config->{'sacrifice'}--;
 									}
 								}
 
@@ -207,8 +211,8 @@ while($running) {											# main loop
 									$block->{'current'} = $response->{'content'}->{'result'};
 									write_client($fh, "\{\"id\":$req->{'id'},\"result\": true\}\n");	# success??? tell the miner it was OK
 
-									if ($config->{'cenote'} > 0) {					# tribute to the gods
-										$config->{'cenote'}--;
+									if ($config->{'sacrifice'} > 0) {					# tribute to the gods
+										$config->{'sacrifice'}--;
 									}
 								}
 								else {
@@ -346,7 +350,7 @@ while($running) {											# main loop
 		my $status = "Cenote $version : Port $config->{'port'} : TotalBlk $conf->{'block_found'}=$found_percent : Mining $block->{'template'}->{'height'}";
 		$status .= " : Miners " . (scalar @active);								# add count of connected miners
 
-		if ($config->{'cenote'} > 0) {
+		if ($config->{'sacrifice'} > 0) {
 			$status .= " : SACRIFICING";
 		}
 
@@ -517,18 +521,17 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 
 	$client_info->{$_[0]}->{'work'}->{'blocknumber'} = $block->{'current'}->{'height'};
 
-	my $coinbase = substr($block->{'current'}->{'coinbasetxn'}->{'data'},0,90);	# get first 90 chars of coinbasetxn
+	my $coinbase_script = substr($block->{'current'}->{'coinbasetxn'}->{'data'},92,10) . unpack('H*',$config->{'text'});	# coinbase script 
 
-	my $coinbase_script = substr($block->{'current'}->{'coinbasetxn'}->{'data'},92,10) . unpack('H*',$config->{'text'});	# new coinbase script 
+	my $coinbase_script_size = compact_size($coinbase_script, 's');								# size
 
-	my $coinbase_script_size = sprintf("%02x", length($coinbase_script)/2);							# size
-
-	$coinbase .= $coinbase_script_size;
-	$coinbase .= $coinbase_script;
-       	$coinbase .= substr($block->{'current'}->{'coinbasetxn'}->{'data'},102);
+	my $coinbase = substr($block->{'current'}->{'coinbasetxn'}->{'data'},0,90);						# get first 90 chars of coinbase
+	$coinbase .= $coinbase_script_size;											# new coinbase size
+	$coinbase .= $coinbase_script;												# new coinbase text
+       	$coinbase .= substr($block->{'current'}->{'coinbasetxn'}->{'data'},102);						# append rest of coinbasetxn
 
 	my $decoded = node_rpc("decoderawtransaction $coinbase" );
-	#	my $modified = $block->{'current'}->{'coinbasetxn'}->{'data'};
+
 	my $modified = $coinbase;
 
 	my $localscriptKey;
@@ -541,7 +544,7 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 		}
 	}
 
-	if ($config->{'cenote'} > 0) {									# set output value to ZERO if we are burning this reward
+	if ($config->{'sacrifice'} > 0) {								# set output value to ZERO if we are burning this reward
 		my $search = $valueSat . '19' . $localscriptKey;
 		my $replace = '000000000000000019' . $client_info->{$_[0]}->{'scriptPubKey'};
 		$modified =~ s/$search/$replace/;
@@ -549,17 +552,19 @@ sub new_work() {												# generate mining task for a client : &newjob(client
 	elsif ($config->{'scrooge'} == 0) {								# scrooge mode forces all miners to use the pool addr
 		$modified =~ s/$localscriptKey/$client_info->{$_[0]}->{'scriptPubKey'}/;
 	}
-	my $newhash = hash_this($modified, 'le');							# get the modified transaction hash
+	my $newhash = hash_this($modified, 'le');							# get hash of coinbasetxn
 
-	push @txid, $newhash;										# add modified transaction hash to txid array
-	$client_info->{$_[0]}->{'work'}->{'transactions'} = $modified;					# modified transaction raw data is the first one
+	push @txid, $newhash;										# add coinbase hash to txn array
+	$client_info->{$_[0]}->{'work'}->{'transactions'} = $modified;					# set count of txns
 	$client_info->{$_[0]}->{'work'}->{'transaction_count'} = 1;
 
-	foreach my $tx ( @{$block->{'current'}->{'transactions'}} ) {					# add all the other transaction
+													# TODO: Add a check to respenct block size
+	foreach my $tx ( @{$block->{'current'}->{'transactions'}} ) {					# now append all the other transaction
 		push @txid, $tx->{'hash'};								# add to txid
 		$client_info->{$_[0]}->{'work'}->{'transactions'} .= $tx->{'data'};			# add to transaction raw data
 		$client_info->{$_[0]}->{'work'}->{'transaction_count'}++;				# increment count
 	}
+
 
 	$client_info->{$_[0]}->{'work'}->{'merkleroot'}           = reverse_bytes(merkleroot(\@txid));	# generate merkleroot
 	$client_info->{$_[0]}->{'work'}->{'transactions'}         = compact_size($client_info->{$_[0]}->{'work'}->{'transaction_count'}) . $client_info->{$_[0]}->{'work'}->{'transactions'};

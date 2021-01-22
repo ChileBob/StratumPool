@@ -1,11 +1,12 @@
-# StratumPool & StratumSolo : Ycash Solo-Mining Stratum Servers
+# StratumPool, StratumSolo & Cenote : Ycash Solo-Mining Stratum Servers
 
 These are a very simple stratum servers for connecting GPU miners to a Ycash full node.
 
 - StratumPool : Clients can specify their own transparent ycash address.
 - StratumSolo : All clients mine to the local node wallet.
+- Cenote      : Solo pool with more options
 
-Both operate as 'solo-pools', miners ONLY get paid if they find a block.
+All operate as 'solo-pools', miners ONLY get paid if they find a block.
 
 Payments are made within the coinbase transaction, which means :-
 - Rewards must mature for 100 blocks before they can be spent.
@@ -24,7 +25,7 @@ If you'd like to buy beers :-
 - GPU Hardware (ie: Nvidia, AMD)
 - GPU Mining Software for Equihash 192,7 (ie: miniZ v1.6w)
 
-(It doesn't work on Window or iThings, but I dont care as I dont have those)
+It doesn't work on Windows or iThings, but I dont care as I dont have any :-)
 
 ## Tested Miners :-
 
@@ -34,7 +35,7 @@ If you'd like to buy beers :-
 
 ## Usage :-
 
-stratumpool 
+stratumpool / stratumsolo
 
 * `-port=3333 (port for miner connections, default 3333)`
 * `-password=notsecret (optional password miners need to connect, default not set)`

@@ -24,6 +24,8 @@ If you'd like to buy beers :-
 - GPU Hardware (ie: Nvidia, AMD)
 - GPU Mining Software for Equihash 192,7 (ie: miniZ v1.6w)
 
+(It doesn't work on Window or iThings, but I dont care as I dont have those)
+
 ## Tested Miners :-
 
 - GMiner (v2.28)
@@ -34,10 +36,15 @@ If you'd like to buy beers :-
 
 stratumpool 
 
-* `--port=3333 (port for miner connections, default 3333)`
-* `--password=notsecret (optional password miners need to connect, default not set)`
+* `-port=3333 (port for miner connections, default 3333)`
+* `-password=notsecret (optional password miners need to connect, default not set)`
 
-stratumsolo (no config needed)
+cenote
+
+* `-text "Coinbase text here" (text to insert in mined blocks)`
+* `-scrooge (all block rewards go to local node wallet)`
+* `-port 3334 (port for miner connections, default 3334)`
+* `-password notsecret (optional password miners need to connect, default not set)`
 
 * default port 3334
 
